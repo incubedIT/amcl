@@ -115,8 +115,6 @@ angle_diff(double a, double b)
     return(d2);
 }
 
-static const std::string scan_topic_ = "scan";
-
 /* This function is only useful to have the whole code work
  * with old rosbags that have trailing slashes for their frames
  */
@@ -150,6 +148,8 @@ class AmclNode
     std::shared_ptr<tf2_ros::TransformBroadcaster> tfb_;
     std::shared_ptr<tf2_ros::TransformListener> tfl_;
     std::shared_ptr<tf2_ros::Buffer> tf_;
+
+    std::string scan_topic_;
 
     bool sent_first_transform_;
 
@@ -353,7 +353,8 @@ AmclNode::AmclNode() :
 	      private_nh_("~"),
         initial_pose_hyp_(NULL),
         first_map_received_(false),
-        first_reconfigure_call_(true)
+        first_reconfigure_call_(true),
+        scan_topic_("scan")
 {
   boost::recursive_mutex::scoped_lock l(configuration_mutex_);
 
@@ -527,6 +528,8 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
     config.restore_defaults = false;
   }
 
+  scan_topic_ = config.scan_topic;
+
   d_thresh_ = config.update_min_d;
   a_thresh_ = config.update_min_a;
 
@@ -651,7 +654,11 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
   base_frame_id_ = stripSlash(config.base_frame_id);
   global_frame_id_ = stripSlash(config.global_frame_id);
 
+  laser_scan_sub_->unsubscribe();
+  laser_scan_filter_->clear();
   delete laser_scan_filter_;
+  delete laser_scan_sub_;
+  laser_scan_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(nh_, scan_topic_, 100);
   laser_scan_filter_ = 
           new tf2_ros::MessageFilter<sensor_msgs::LaserScan>(*laser_scan_sub_,
                                                              *tf_,
