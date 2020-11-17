@@ -105,6 +105,15 @@ class AMCLLaser : public AMCLSensor
   private: static double LikelihoodFieldModelProb(AMCLLaserData *data, 
 					     pf_sample_set_t* set);
 
+  // Set Ignore map
+  public: void setIgnoreMap(map_t* ignore_grid);
+
+  // Free memory of allocated ignore map
+  private: void freeIgnoreMap();
+
+  // Check if beam should be ignored
+  private: bool ignoreBeam(int mx, int my);
+
   private: void reallocTempData(int max_samples, int max_obs);
 
   private: laser_model_t model_type;
@@ -114,6 +123,9 @@ class AMCLLaser : public AMCLSensor
 
   // The laser map
   private: map_t *map;
+
+  // Ignored map-points
+  private: map_t *ignore_map_;
 
   // Laser offset relative to robot
   private: pf_vector_t laser_pose;

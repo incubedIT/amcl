@@ -43,13 +43,13 @@ using namespace amcl;
 // Default constructor
 AMCLLaser::AMCLLaser(size_t max_beams, map_t* map) : AMCLSensor(), 
 						     max_samples(0), max_obs(0), 
-						     temp_obs(NULL)
+						     temp_obs(NULL),
+						     ignore_map_(NULL)
 {
   this->time = 0.0;
 
   this->max_beams = max_beams;
   this->map = map;
-
   return;
 }
 
@@ -60,6 +60,32 @@ AMCLLaser::~AMCLLaser()
 	  delete [] temp_obs[k];
 	}
 	delete []temp_obs; 
+  }
+
+  freeIgnoreMap();
+}
+
+void AMCLLaser::setIgnoreMap(map_t *ignore_map)
+{
+  freeIgnoreMap();
+
+  if(ignore_map->size_x == map->size_x &&
+    ignore_map->size_y == map->size_y &&
+    ignore_map->origin_x == map->origin_x &&
+    ignore_map->origin_y == map->origin_y &&
+    ignore_map->scale == map->scale)
+  {
+    ignore_map_ = ignore_map;
+  }
+}
+
+void
+AMCLLaser::freeIgnoreMap()
+{
+  if (ignore_map_ != NULL)
+  {
+    map_free(this->ignore_map_);
+    ignore_map_ = NULL;
   }
 }
 
@@ -152,6 +178,7 @@ double AMCLLaser::BeamModel(AMCLLaserData *data, pf_sample_set_t* set)
   double total_weight;
   pf_sample_t *sample;
   pf_vector_t pose;
+  pf_vector_t hit;
 
   self = (AMCLLaser*) data->sensor;
 
@@ -173,6 +200,19 @@ double AMCLLaser::BeamModel(AMCLLaserData *data, pf_sample_set_t* set)
     {
       obs_range = data->ranges[i][0];
       obs_bearing = data->ranges[i][1];
+
+      // Compute the endpoint of the beam
+      hit.v[0] = pose.v[0] + obs_range * cos(pose.v[2] + obs_bearing);
+      hit.v[1] = pose.v[1] + obs_range * sin(pose.v[2] + obs_bearing);
+
+      // Convert to map grid coords.
+      int mi, mj;
+      mi = MAP_GXWX(self->map, hit.v[0]);
+      mj = MAP_GYWY(self->map, hit.v[1]);
+      if (self->ignoreBeam(mi, mj))
+      {
+        continue;
+      }
 
       // Compute the range according to the map
       map_range = map_calc_range(self->map, pose.v[0], pose.v[1],
@@ -272,7 +312,12 @@ double AMCLLaser::LikelihoodFieldModel(AMCLLaserData *data, pf_sample_set_t* set
       int mi, mj;
       mi = MAP_GXWX(self->map, hit.v[0]);
       mj = MAP_GYWY(self->map, hit.v[1]);
-      
+
+      if(self->ignoreBeam(mi, mj))
+      {
+        continue;
+      }
+
       // Part 1: Get distance from the hit to closest obstacle.
       // Off-map penalized as max distance
       if(!MAP_VALID(self->map, mi, mj))
@@ -407,7 +452,11 @@ double AMCLLaser::LikelihoodFieldModelProb(AMCLLaserData *data, pf_sample_set_t*
       int mi, mj;
       mi = MAP_GXWX(self->map, hit.v[0]);
       mj = MAP_GYWY(self->map, hit.v[1]);
-      
+
+      if(self->ignoreBeam(mi, mj))
+      {
+        continue;
+      }
       // Part 1: Get distance from the hit to closest obstacle.
       // Off-map penalized as max distance
       
@@ -507,4 +556,17 @@ void AMCLLaser::reallocTempData(int new_max_samples, int new_max_obs){
   for(int k=0; k < max_samples; k++){
     temp_obs[k] = new double[max_obs]();
   }
+}
+
+bool AMCLLaser::ignoreBeam(int mx, int my)
+{
+  if (ignore_map_ != NULL && MAP_VALID(ignore_map_, mx, my))
+  {
+    if (ignore_map_->cells[MAP_INDEX(ignore_map_, mx, my)].occ_state == 1)
+    {
+      return true;
+    }
+  }
+
+  return false;
 }

@@ -155,6 +155,7 @@ class AmclNode
 
     tf2::Transform latest_tf_;
     bool latest_tf_valid_;
+    nav_msgs::OccupancyGrid ignore_grid_msg_;
 
     // Pose-generating function used to uniformly distribute particles over
     // the map
@@ -174,6 +175,8 @@ class AmclNode
     void initialPoseReceived(const geometry_msgs::PoseWithCovarianceStampedConstPtr& msg);
     void handleInitialPoseMessage(const geometry_msgs::PoseWithCovarianceStamped& msg);
     void mapReceived(const nav_msgs::OccupancyGridConstPtr& msg);
+    void ignoreMapReceived(const nav_msgs::OccupancyGridConstPtr& msg);
+    void updateIgnoreMap(const nav_msgs::OccupancyGrid& ignore_grid);
 
     void handleMapMessage(const nav_msgs::OccupancyGrid& msg);
     void freeMapDependentMemory();
@@ -255,6 +258,7 @@ class AmclNode
     ros::ServiceServer set_map_srv_;
     ros::Subscriber initial_pose_sub_old_;
     ros::Subscriber map_sub_;
+    ros::Subscriber ignore_map_sub_;
 
     diagnostic_updater::Updater diagnosic_updater_;
     void standardDeviationDiagnostics(diagnostic_updater::DiagnosticStatusWrapper& diagnostic_status);
@@ -495,6 +499,8 @@ AmclNode::AmclNode() :
     requestMap();
   }
   m_force_update = false;
+
+  ignore_map_sub_ = nh_.subscribe("ignore_map", 1, &AmclNode::ignoreMapReceived, this);
 
   dsrv_ = new dynamic_reconfigure::Server<amcl::AMCLConfig>(ros::NodeHandle("~"));
   dynamic_reconfigure::Server<amcl::AMCLConfig>::CallbackType cb = boost::bind(&AmclNode::reconfigureCB, this, _1, _2);
@@ -874,6 +880,35 @@ AmclNode::mapReceived(const nav_msgs::OccupancyGridConstPtr& msg)
 }
 
 void
+AmclNode::ignoreMapReceived(const nav_msgs::OccupancyGridConstPtr& msg)
+{
+  boost::recursive_mutex::scoped_lock cfl(configuration_mutex_);
+
+  ROS_INFO_NAMED("ignoreMap", "Received ignore map  %d X %d map @ %.3f m/pix",
+           msg->info.width,
+           msg->info.height,
+           msg->info.resolution);
+
+  ignore_grid_msg_ = *msg;
+  updateIgnoreMap(ignore_grid_msg_);
+}
+
+void
+AmclNode::updateIgnoreMap(const nav_msgs::OccupancyGrid& ignore_grid)
+{
+  if (ignore_grid.data.empty())
+  {
+    return;
+  }
+
+  laser_->setIgnoreMap(convertMap(ignore_grid));
+  for (AMCLLaser* laser : lasers_)
+  {
+    laser->setIgnoreMap(convertMap(ignore_grid));
+  }
+}
+
+void
 AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
 {
   boost::recursive_mutex::scoped_lock cfl(configuration_mutex_);
@@ -937,6 +972,9 @@ AmclNode::handleMapMessage(const nav_msgs::OccupancyGrid& msg)
   delete laser_;
   laser_ = new AMCLLaser(max_beams_, map_);
   ROS_ASSERT(laser_);
+
+  updateIgnoreMap(ignore_grid_msg_);
+
   if(laser_model_type_ == LASER_MODEL_BEAM)
     laser_->SetModelBeam(z_hit_, z_short_, z_max_, z_rand_,
                          sigma_hit_, lambda_short_, 0.0);
