@@ -787,12 +787,21 @@ void AmclNode::savePoseToServer()
   private_nh_.setParam("initial_pose_x", map_pose.getOrigin().x());
   private_nh_.setParam("initial_pose_y", map_pose.getOrigin().y());
   private_nh_.setParam("initial_pose_a", yaw);
-  private_nh_.setParam("initial_cov_xx", 
-                                  last_published_pose.pose.covariance[6*0+0]);
-  private_nh_.setParam("initial_cov_yy", 
-                                  last_published_pose.pose.covariance[6*1+1]);
-  private_nh_.setParam("initial_cov_aa", 
-                                  last_published_pose.pose.covariance[6*5+5]);
+
+  if(last_published_pose.pose.covariance[6*0+0] > 0 &&
+     last_published_pose.pose.covariance[6*1+1] > 0 &&
+     last_published_pose.pose.covariance[6*5+5] > 0) {
+    ROS_DEBUG("Saving Covariance to server: %.20f, %.20f, %.20f",
+              last_published_pose.pose.covariance[6 * 0 + 0],
+              last_published_pose.pose.covariance[6 * 1 + 1],
+              last_published_pose.pose.covariance[6 * 5 + 5]);
+    private_nh_.setParam("initial_cov_xx",
+                         last_published_pose.pose.covariance[6 * 0 + 0]);
+    private_nh_.setParam("initial_cov_yy",
+                         last_published_pose.pose.covariance[6 * 1 + 1]);
+    private_nh_.setParam("initial_cov_aa",
+                         last_published_pose.pose.covariance[6 * 5 + 5]);
+  }
 }
 
 void AmclNode::updatePoseFromServer()
