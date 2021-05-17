@@ -196,6 +196,7 @@ class AmclNode
 
     bool use_map_topic_;
     bool first_map_only_;
+    std:: string map_topic_name_;
 
     ros::Duration gui_publish_period;
     ros::Time save_pose_last_time;
@@ -357,6 +358,7 @@ AmclNode::AmclNode() :
 	      private_nh_("~"),
         initial_pose_hyp_(NULL),
         first_map_received_(false),
+        map_topic_name_("map"),
         first_reconfigure_call_(true),
         scan_topic_("scan")
 {
@@ -493,8 +495,8 @@ AmclNode::AmclNode() :
   initial_pose_sub_ = nh_.subscribe("initialpose", 2, &AmclNode::initialPoseReceived, this);
 
   if(use_map_topic_) {
-    map_sub_ = nh_.subscribe("map", 1, &AmclNode::mapReceived, this);
-    ROS_INFO("Subscribed to map topic.");
+    map_sub_ = nh_.subscribe(map_topic_name_, 1, &AmclNode::mapReceived, this);
+    ROS_INFO("Subscribed to map topic: %s", map_topic_name_.c_str());
   } else {
     requestMap();
   }
@@ -532,6 +534,13 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
     config = default_config_;
     //avoid looping
     config.restore_defaults = false;
+  }
+
+  if(use_map_topic_ && map_topic_name_ != config.map_topic_name) {
+      map_sub_.shutdown();
+      map_topic_name_ = config.map_topic_name;
+      map_sub_ = nh_.subscribe(map_topic_name_, 1, &AmclNode::mapReceived, this);
+      ROS_INFO("Subscribed to map topic: %s", map_topic_name_.c_str());
   }
 
   scan_topic_ = config.scan_topic;
