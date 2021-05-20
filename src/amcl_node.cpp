@@ -296,6 +296,13 @@ class AmclNode
     ros::Time last_laser_received_ts_;
     ros::Duration laser_check_interval_;
     void checkLaserReceived(const ros::TimerEvent& event);
+
+    double initial_pose_x_ = NAN;
+    double initial_pose_y_ = NAN;
+    double initial_pose_a_ = NAN;
+    double initial_cov_xx_ = NAN;
+    double initial_cov_yy_ = NAN;
+    double initial_cov_aa_ = NAN;
 };
 
 std::vector<std::pair<int,int> > AmclNode::free_space_indices;
@@ -386,7 +393,7 @@ AmclNode::AmclNode() :
   private_nh_.param("odom_alpha3", alpha3_, 0.2);
   private_nh_.param("odom_alpha4", alpha4_, 0.2);
   private_nh_.param("odom_alpha5", alpha5_, 0.2);
-  
+
   private_nh_.param("do_beamskip", do_beamskip_, false);
   private_nh_.param("beam_skip_distance", beam_skip_distance_, 0.5);
   private_nh_.param("beam_skip_threshold", beam_skip_threshold_, 0.3);
@@ -477,14 +484,14 @@ AmclNode::AmclNode() :
 
   pose_pub_ = nh_.advertise<geometry_msgs::PoseWithCovarianceStamped>("amcl_pose", 2, true);
   particlecloud_pub_ = nh_.advertise<geometry_msgs::PoseArray>("particlecloud", 2, true);
-  global_loc_srv_ = nh_.advertiseService("global_localization", 
+  global_loc_srv_ = nh_.advertiseService("global_localization",
 					 &AmclNode::globalLocalizationCallback,
                                          this);
   nomotion_update_srv_= nh_.advertiseService("request_nomotion_update", &AmclNode::nomotionUpdateCallback, this);
   set_map_srv_= nh_.advertiseService("set_map", &AmclNode::setMapCallback, this);
 
   laser_scan_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(nh_, scan_topic_, 100);
-  laser_scan_filter_ = 
+  laser_scan_filter_ =
           new tf2_ros::MessageFilter<sensor_msgs::LaserScan>(*laser_scan_sub_,
                                                              *tf_,
                                                              odom_frame_id_,
@@ -510,7 +517,7 @@ AmclNode::AmclNode() :
 
   // 15s timer to warn on lack of receipt of laser scans, #5209
   laser_check_interval_ = ros::Duration(15.0);
-  check_laser_timer_ = nh_.createTimer(laser_check_interval_, 
+  check_laser_timer_ = nh_.createTimer(laser_check_interval_,
                                        boost::bind(&AmclNode::checkLaserReceived, this, _1));
 
   diagnosic_updater_.setHardwareID("None");
@@ -601,10 +608,10 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
   alpha_fast_ = config.recovery_alpha_fast;
   tf_broadcast_ = config.tf_broadcast;
 
-  do_beamskip_= config.do_beamskip; 
-  beam_skip_distance_ = config.beam_skip_distance; 
-  beam_skip_threshold_ = config.beam_skip_threshold; 
-  
+  do_beamskip_= config.do_beamskip;
+  beam_skip_distance_ = config.beam_skip_distance;
+  beam_skip_threshold_ = config.beam_skip_threshold;
+
   // Clear queued laser objects so that their parameters get updated
   lasers_.clear();
   lasers_update_.clear();
@@ -614,14 +621,14 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
   {
     pf_free( pf_ );
     pf_ = NULL;
-  }	
+  }
   pf_ = pf_alloc(min_particles_, max_particles_,
                  alpha_slow_, alpha_fast_,
                  (pf_init_model_fn_t)AmclNode::uniformPoseGenerator,
                  (void *)map_);
   pf_set_selective_resampling(pf_, selective_resampling_);
-  pf_err_ = config.kld_err; 
-  pf_z_ = config.kld_z; 
+  pf_err_ = config.kld_err;
+  pf_z_ = config.kld_z;
   pf_->pop_err = pf_err_;
   pf_->pop_z = pf_z_;
 
@@ -653,8 +660,8 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
   else if(laser_model_type_ == LASER_MODEL_LIKELIHOOD_FIELD_PROB){
     ROS_INFO("Initializing likelihood field model; this can take some time on large maps...");
     laser_->SetModelLikelihoodFieldProb(z_hit_, z_rand_, sigma_hit_,
-					laser_likelihood_max_dist_, 
-					do_beamskip_, beam_skip_distance_, 
+					laser_likelihood_max_dist_,
+					do_beamskip_, beam_skip_distance_,
 					beam_skip_threshold_, beam_skip_error_threshold_);
     ROS_INFO("Done initializing likelihood field model with probabilities.");
   }
@@ -674,7 +681,7 @@ void AmclNode::reconfigureCB(AMCLConfig &config, uint32_t level)
   delete laser_scan_filter_;
   delete laser_scan_sub_;
   laser_scan_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(nh_, scan_topic_, 100);
-  laser_scan_filter_ = 
+  laser_scan_filter_ =
           new tf2_ros::MessageFilter<sensor_msgs::LaserScan>(*laser_scan_sub_,
                                                              *tf_,
                                                              odom_frame_id_,
@@ -793,9 +800,9 @@ void AmclNode::savePoseToServer()
 
   ROS_DEBUG("Saving pose to server. x: %.3f, y: %.3f", map_pose.getOrigin().x(), map_pose.getOrigin().y() );
 
-  private_nh_.setParam("initial_pose_x", map_pose.getOrigin().x());
-  private_nh_.setParam("initial_pose_y", map_pose.getOrigin().y());
-  private_nh_.setParam("initial_pose_a", yaw);
+  initial_pose_x_ = map_pose.getOrigin().x();
+  initial_pose_y_ = map_pose.getOrigin().y();
+  initial_pose_a_ = yaw;
 
   if(last_published_pose.pose.covariance[6*0+0] > 0 &&
      last_published_pose.pose.covariance[6*1+1] > 0 &&
@@ -804,12 +811,9 @@ void AmclNode::savePoseToServer()
               last_published_pose.pose.covariance[6 * 0 + 0],
               last_published_pose.pose.covariance[6 * 1 + 1],
               last_published_pose.pose.covariance[6 * 5 + 5]);
-    private_nh_.setParam("initial_cov_xx",
-                         last_published_pose.pose.covariance[6 * 0 + 0]);
-    private_nh_.setParam("initial_cov_yy",
-                         last_published_pose.pose.covariance[6 * 1 + 1]);
-    private_nh_.setParam("initial_cov_aa",
-                         last_published_pose.pose.covariance[6 * 5 + 5]);
+    initial_cov_xx_ = last_published_pose.pose.covariance[6 * 0 + 0];
+    initial_cov_yy_ = last_published_pose.pose.covariance[6 * 1 + 1];
+    initial_cov_aa_ = last_published_pose.pose.covariance[6 * 5 + 5];
   }
 }
 
@@ -822,35 +826,28 @@ void AmclNode::updatePoseFromServer()
   init_cov_[1] = 0.5 * 0.5;
   init_cov_[2] = (M_PI/12.0) * (M_PI/12.0);
   // Check for NAN on input from param server, #5239
-  double tmp_pos;
-  private_nh_.param("initial_pose_x", tmp_pos, init_pose_[0]);
-  if(!std::isnan(tmp_pos))
-    init_pose_[0] = tmp_pos;
-  else 
+  if(!std::isnan(initial_pose_x_))
+    init_pose_[0] = initial_pose_x_;
+  else
     ROS_WARN("ignoring NAN in initial pose X position");
-  private_nh_.param("initial_pose_y", tmp_pos, init_pose_[1]);
-  if(!std::isnan(tmp_pos))
-    init_pose_[1] = tmp_pos;
+  if(!std::isnan(initial_pose_y_))
+    init_pose_[1] = initial_pose_y_;
   else
     ROS_WARN("ignoring NAN in initial pose Y position");
-  private_nh_.param("initial_pose_a", tmp_pos, init_pose_[2]);
-  if(!std::isnan(tmp_pos))
-    init_pose_[2] = tmp_pos;
+  if(!std::isnan(initial_pose_a_))
+    init_pose_[2] = initial_pose_a_;
   else
     ROS_WARN("ignoring NAN in initial pose Yaw");
-  private_nh_.param("initial_cov_xx", tmp_pos, init_cov_[0]);
-  if(!std::isnan(tmp_pos))
-    init_cov_[0] =tmp_pos;
+  if(!std::isnan(initial_cov_xx_))
+    init_cov_[0] =initial_cov_xx_;
   else
     ROS_WARN("ignoring NAN in initial covariance XX");
-  private_nh_.param("initial_cov_yy", tmp_pos, init_cov_[1]);
-  if(!std::isnan(tmp_pos))
-    init_cov_[1] = tmp_pos;
+  if(!std::isnan(initial_cov_yy_))
+    init_cov_[1] = initial_cov_yy_;
   else
     ROS_WARN("ignoring NAN in initial covariance YY");
-  private_nh_.param("initial_cov_aa", tmp_pos, init_cov_[2]);
-  if(!std::isnan(tmp_pos))
-    init_cov_[2] = tmp_pos;
+  if(!std::isnan(initial_cov_aa_))
+    init_cov_[2] = initial_cov_aa_;
   else
     ROS_WARN("ignoring NAN in initial covariance AA");	
 }
