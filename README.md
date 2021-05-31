@@ -9,3 +9,4 @@ Fork from https://github.com/ros-planning/navigation/tree/melodic-devel/amcl wit
 * Avoid that a negative covariance is stored to the parameter, to avoid not-a-number issues at map-updates
 * Possibility to change the scan-topic dynamically
 * Added possibility to ignore beams during calculating probability for the given pose
+* Avoid that the amcl node writes its last pose to the parameter server
