@@ -296,6 +296,13 @@ class AmclNode
     ros::Time last_laser_received_ts_;
     ros::Duration laser_check_interval_;
     void checkLaserReceived(const ros::TimerEvent& event);
+
+    double initial_pose_x_ = NAN;
+    double initial_pose_y_ = NAN;
+    double initial_pose_a_ = NAN;
+    double initial_cov_xx_ = NAN;
+    double initial_cov_yy_ = NAN;
+    double initial_cov_aa_ = NAN;
 };
 
 std::vector<std::pair<int,int> > AmclNode::free_space_indices;
@@ -793,9 +800,9 @@ void AmclNode::savePoseToServer()
 
   ROS_DEBUG("Saving pose to server. x: %.3f, y: %.3f", map_pose.getOrigin().x(), map_pose.getOrigin().y() );
 
-  private_nh_.setParam("initial_pose_x", map_pose.getOrigin().x());
-  private_nh_.setParam("initial_pose_y", map_pose.getOrigin().y());
-  private_nh_.setParam("initial_pose_a", yaw);
+  initial_pose_x_ = map_pose.getOrigin().x();
+  initial_pose_y_ = map_pose.getOrigin().y();
+  initial_pose_a_ = yaw;
 
   if(last_published_pose.pose.covariance[6*0+0] > 0 &&
      last_published_pose.pose.covariance[6*1+1] > 0 &&
@@ -804,12 +811,9 @@ void AmclNode::savePoseToServer()
               last_published_pose.pose.covariance[6 * 0 + 0],
               last_published_pose.pose.covariance[6 * 1 + 1],
               last_published_pose.pose.covariance[6 * 5 + 5]);
-    private_nh_.setParam("initial_cov_xx",
-                         last_published_pose.pose.covariance[6 * 0 + 0]);
-    private_nh_.setParam("initial_cov_yy",
-                         last_published_pose.pose.covariance[6 * 1 + 1]);
-    private_nh_.setParam("initial_cov_aa",
-                         last_published_pose.pose.covariance[6 * 5 + 5]);
+    initial_cov_xx_ = last_published_pose.pose.covariance[6 * 0 + 0];
+    initial_cov_yy_ = last_published_pose.pose.covariance[6 * 1 + 1];
+    initial_cov_aa_ = last_published_pose.pose.covariance[6 * 5 + 5];
   }
 }
 
@@ -822,35 +826,28 @@ void AmclNode::updatePoseFromServer()
   init_cov_[1] = 0.5 * 0.5;
   init_cov_[2] = (M_PI/12.0) * (M_PI/12.0);
   // Check for NAN on input from param server, #5239
-  double tmp_pos;
-  private_nh_.param("initial_pose_x", tmp_pos, init_pose_[0]);
-  if(!std::isnan(tmp_pos))
-    init_pose_[0] = tmp_pos;
+  if(!std::isnan(initial_pose_x_))
+    init_pose_[0] = initial_pose_x_;
   else 
     ROS_WARN("ignoring NAN in initial pose X position");
-  private_nh_.param("initial_pose_y", tmp_pos, init_pose_[1]);
-  if(!std::isnan(tmp_pos))
-    init_pose_[1] = tmp_pos;
+  if(!std::isnan(initial_pose_y_))
+    init_pose_[1] = initial_pose_y_;
   else
     ROS_WARN("ignoring NAN in initial pose Y position");
-  private_nh_.param("initial_pose_a", tmp_pos, init_pose_[2]);
-  if(!std::isnan(tmp_pos))
-    init_pose_[2] = tmp_pos;
+  if(!std::isnan(initial_pose_a_))
+    init_pose_[2] = initial_pose_a_;
   else
     ROS_WARN("ignoring NAN in initial pose Yaw");
-  private_nh_.param("initial_cov_xx", tmp_pos, init_cov_[0]);
-  if(!std::isnan(tmp_pos))
-    init_cov_[0] =tmp_pos;
+  if(!std::isnan(initial_cov_xx_))
+    init_cov_[0] =initial_cov_xx_;
   else
     ROS_WARN("ignoring NAN in initial covariance XX");
-  private_nh_.param("initial_cov_yy", tmp_pos, init_cov_[1]);
-  if(!std::isnan(tmp_pos))
-    init_cov_[1] = tmp_pos;
+  if(!std::isnan(initial_cov_yy_))
+    init_cov_[1] = initial_cov_yy_;
   else
     ROS_WARN("ignoring NAN in initial covariance YY");
-  private_nh_.param("initial_cov_aa", tmp_pos, init_cov_[2]);
-  if(!std::isnan(tmp_pos))
-    init_cov_[2] = tmp_pos;
+  if(!std::isnan(initial_cov_aa_))
+    init_cov_[2] = initial_cov_aa_;
   else
     ROS_WARN("ignoring NAN in initial covariance AA");	
 }
